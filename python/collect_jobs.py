@@ -6,6 +6,8 @@ import requests
 
 API_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobs"
 
+OUTPUT_PATH = Path("data/raw/jobs.csv")
+
 
 def main():
     params = {
@@ -32,43 +34,44 @@ def main():
     response.raise_for_status()
 
     data = response.json()
-
-    print("Response type:", type(data))
-    print("Top-level keys:", data.keys())
-
     jobs = data["stellenangebote"]
+
+    print("Number of jobs received:", len(jobs))
 
     jobs_list = []
 
-    print()
-    print("Number of jobs:", len(jobs))
-    print()
-
     for job in jobs:
+        workplace = job.get("arbeitsort", {})
+
         jobs_list.append(
-    {
-        "title": job["titel"],
-        "profession": job["beruf"],
-        "company": job["arbeitgeber"],
-        "city": job["arbeitsort"]["ort"],
-        "state": job["arbeitsort"]["region"],
-        "country": job["arbeitsort"]["land"],
-    }
-)
+            {
+                "title": job.get("titel"),
+                "profession": job.get("beruf"),
+                "company": job.get("arbeitgeber"),
+                "city": workplace.get("ort"),
+                "state": workplace.get("region"),
+                "country": workplace.get("land"),
+            }
+        )
+
     df = pd.DataFrame(jobs_list)
 
-    output_path = Path("data/raw/jobs.csv")
+    OUTPUT_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     df.to_csv(
-    output_path,
-    index=False,
-    encoding="utf-8-sig",
-)
+        OUTPUT_PATH,
+        sep=";",
+        index=False,
+        encoding="utf-8-sig",
+    )
 
     print()
     print(df)
     print()
-    print(f"Saved {len(df)} jobs to {output_path}")
+    print(f"Saved {len(df)} jobs to {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":
