@@ -1,16 +1,27 @@
 import base64
+import time
 from pathlib import Path
 
 import pandas as pd
 import requests
 
-API_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs"
+
+API_URL = (
+    "https://rest.arbeitsagentur.de/"
+    "jobboerse/jobsuche-service/pc/v6/jobs"
+)
+
+DETAILS_API_URL = (
+    "https://rest.arbeitsagentur.de/"
+    "jobboerse/jobsuche-service/pc/v4/jobdetails"
+)
 
 SEARCH_QUERY = "Analyst"
 SEARCH_LOCATION = "Deutschland"
 
-PAGE = 1
 PAGE_SIZE = 100
+DETAILS_TEST_LIMIT = None
+REQUEST_DELAY_SECONDS = 0.5
 
 OUTPUT_PATH = Path("data/raw/jobs.csv")
 
@@ -54,6 +65,66 @@ def fetch_jobs_page(
     return jobs, total_jobs
 
 
+def fetch_job_details(job_id: str) -> dict:
+    encoded_job_id = base64.b64encode(
+        job_id.encode("utf-8")
+    ).decode("utf-8")
+
+    headers = {
+        "X-API-Key": "jobboerse-jobsuche",
+    }
+
+    response = requests.get(
+        f"{DETAILS_API_URL}/{encoded_job_id}",
+        headers=headers,
+        timeout=30,
+    )
+
+    print("Details status code:", response.status_code)
+
+    response.raise_for_status()
+
+    return response.json()
+
+def enrich_jobs_with_details(
+    jobs: list[dict],
+    limit: int | None = None,
+    delay_seconds: float = 0.5,
+) -> list[dict]:
+    enriched_jobs = []
+
+    jobs_to_process = jobs[:limit] if limit is not None else jobs
+
+    for index, job in enumerate(jobs_to_process, start=1):
+        job_id = job.get("referenznummer")
+
+        if not job_id:
+            print(f"Job {index}: missing reference number")
+            enriched_jobs.append(job)
+            continue
+
+        try:
+            details = fetch_job_details(job_id)
+
+            enriched_job = job.copy()
+            enriched_job.update(details)
+
+            enriched_jobs.append(enriched_job)
+
+            print(
+                f"Details {index}/{len(jobs_to_process)}: "
+                f"{job.get('stellenangebotsTitel')}"
+            )
+
+        except requests.RequestException as error:
+            print(f"Could not fetch details for {job_id}: {error}")
+            enriched_jobs.append(job)
+
+        time.sleep(delay_seconds)
+
+    return enriched_jobs
+
+
 def fetch_all_jobs(
     query: str,
     location: str,
@@ -86,16 +157,19 @@ def transform_jobs(jobs: list[dict]) -> pd.DataFrame:
     for job in jobs:
         locations = job.get("stellenlokationen", [])
         location = locations[0] if locations else {}
+
         address = location.get("adresse", {})
         start_period = job.get("eintrittszeitraum", {})
         publication_period = job.get("veroeffentlichungszeitraum", {})
+
+        all_professions = job.get("alleBerufe") or []
 
         jobs_list.append(
             {
                 "job_id": job.get("referenznummer"),
                 "title": job.get("stellenangebotsTitel"),
                 "profession": job.get("hauptberuf"),
-                "all_professions": ", ".join(job.get("alleBerufe", [])),
+                "all_professions": ", ".join(all_professions),
                 "company": job.get("firma"),
                 "postal_code": address.get("plz"),
                 "city": address.get("ort"),
@@ -116,13 +190,22 @@ def transform_jobs(jobs: list[dict]) -> pd.DataFrame:
                 "salary_max": job.get("gehaltsspanneBis"),
                 "mini_job": job.get("istGeringfuegigeBeschaeftigung"),
                 "career_changer": job.get("quereinstiegGeeignet"),
+                "description": job.get("stellenangebotsBeschreibung"),
+                "company_url": job.get("allianzpartnerUrl"),
+                "alliance_partner": job.get("allianzpartnerName"),
+                "temporary_employment": job.get("istArbeitnehmerUeberlassung"),
+                "private_job_agency": job.get("istPrivateArbeitsvermittlung"),
+                "disability_required": job.get("istBehinderungGefordert"),
             }
         )
 
     return pd.DataFrame(jobs_list)
 
 
-def save_jobs(df: pd.DataFrame, output_path: Path) -> None:
+def save_jobs(
+    df: pd.DataFrame,
+    output_path: Path,
+) -> None:
     output_path.parent.mkdir(
         parents=True,
         exist_ok=True,
@@ -138,16 +221,25 @@ def save_jobs(df: pd.DataFrame, output_path: Path) -> None:
 
 def main() -> None:
     jobs = fetch_all_jobs(
-    query=SEARCH_QUERY,
-    location=SEARCH_LOCATION,
-    page_size=PAGE_SIZE,
-)
+        query=SEARCH_QUERY,
+        location=SEARCH_LOCATION,
+        page_size=PAGE_SIZE,
+    )
 
     print("Number of jobs received:", len(jobs))
 
-    df = transform_jobs(jobs)
+    enriched_jobs = enrich_jobs_with_details(
+    jobs,
+    limit=DETAILS_TEST_LIMIT,
+    delay_seconds=REQUEST_DELAY_SECONDS,
+    )
 
-    save_jobs(df, OUTPUT_PATH)
+    df = transform_jobs(enriched_jobs)
+
+    save_jobs(
+        df,
+        OUTPUT_PATH,
+    )
 
     print()
     print(df)
