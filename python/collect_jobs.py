@@ -1,4 +1,5 @@
 from pathlib import Path
+from pprint import pprint
 
 import pandas as pd
 import requests
@@ -43,9 +44,9 @@ def fetch_jobs_page(
 
     data = response.json()
 
-    jobs = data["stellenangebote"]
-    total_jobs = data["maxErgebnisse"]
-
+    jobs = data.get("stellenangebote", [])
+    total_jobs = data.get("maxErgebnisse", 0)
+    
     print(
         f"Page {page}: received {len(jobs)} jobs "
         f"of {total_jobs} total"
@@ -85,15 +86,23 @@ def transform_jobs(jobs: list[dict]) -> pd.DataFrame:
 
     for job in jobs:
         workplace = job.get("arbeitsort", {})
+        coordinates = workplace.get("koordinaten", {})
 
         jobs_list.append(
             {
+                "job_id": job.get("refnr"),
                 "title": job.get("titel"),
                 "profession": job.get("beruf"),
                 "company": job.get("arbeitgeber"),
+                "postal_code": workplace.get("plz"),
                 "city": workplace.get("ort"),
                 "state": workplace.get("region"),
                 "country": workplace.get("land"),
+                "latitude": coordinates.get("lat"),
+                "longitude": coordinates.get("lon"),
+                "date_posted": job.get("aktuelleVeroeffentlichungsdatum"),
+                "date_modified": job.get("modifikationsTimestamp"),
+                "start_date": job.get("eintrittsdatum"),
             }
         )
 
