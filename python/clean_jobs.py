@@ -170,7 +170,8 @@ def main() -> None:
     )
 
     print()
-    print("Cleaned dataset shape:", df.shape)
+    print(f"Cleaned dataset shape: {df.shape}")
+    print(f"Columns: {len(df.columns)}")
     print()
     print(df.head())
 
