@@ -6,15 +6,26 @@ import requests
 
 API_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobs"
 
+SEARCH_QUERY = "Analyst"
+SEARCH_LOCATION = "Deutschland"
+
+PAGE = 1
+PAGE_SIZE = 100
+
 OUTPUT_PATH = Path("data/raw/jobs.csv")
 
 
-def main():
+def fetch_jobs_page(
+    query: str,
+    location: str,
+    page: int,
+    size: int,
+) -> tuple[list[dict], int]:
     params = {
-        "was": "Analyst",
-        "wo": "Deutschland",
-        "page": 1,
-        "size": 10,
+        "was": query,
+        "wo": location,
+        "page": page,
+        "size": size,
     }
 
     headers = {
@@ -28,16 +39,48 @@ def main():
         timeout=30,
     )
 
-    print("Status code:", response.status_code)
-    print("Requested URL:", response.url)
-
     response.raise_for_status()
 
     data = response.json()
+
     jobs = data["stellenangebote"]
+    total_jobs = data["maxErgebnisse"]
 
-    print("Number of jobs received:", len(jobs))
+    print(
+        f"Page {page}: received {len(jobs)} jobs "
+        f"of {total_jobs} total"
+    )
 
+    return jobs, total_jobs
+
+
+def fetch_all_jobs(
+    query: str,
+    location: str,
+    page_size: int,
+) -> list[dict]:
+    all_jobs = []
+    page = 1
+
+    while True:
+        jobs, total_jobs = fetch_jobs_page(
+            query=query,
+            location=location,
+            page=page,
+            size=page_size,
+        )
+
+        all_jobs.extend(jobs)
+
+        if len(all_jobs) >= total_jobs or not jobs:
+            break
+
+        page += 1
+
+    return all_jobs
+
+
+def transform_jobs(jobs: list[dict]) -> pd.DataFrame:
     jobs_list = []
 
     for job in jobs:
@@ -54,19 +97,35 @@ def main():
             }
         )
 
-    df = pd.DataFrame(jobs_list)
+    return pd.DataFrame(jobs_list)
 
-    OUTPUT_PATH.parent.mkdir(
+
+def save_jobs(df: pd.DataFrame, output_path: Path) -> None:
+    output_path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     df.to_csv(
-        OUTPUT_PATH,
+        output_path,
         sep=";",
         index=False,
         encoding="utf-8-sig",
     )
+
+
+def main() -> None:
+    jobs = fetch_all_jobs(
+    query=SEARCH_QUERY,
+    location=SEARCH_LOCATION,
+    page_size=PAGE_SIZE,
+)
+
+    print("Number of jobs received:", len(jobs))
+
+    df = transform_jobs(jobs)
+
+    save_jobs(df, OUTPUT_PATH)
 
     print()
     print(df)
