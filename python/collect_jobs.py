@@ -1,11 +1,10 @@
+import base64
 from pathlib import Path
-from pprint import pprint
 
 import pandas as pd
 import requests
 
-
-API_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobs"
+API_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs"
 
 SEARCH_QUERY = "Analyst"
 SEARCH_LOCATION = "Deutschland"
@@ -44,9 +43,9 @@ def fetch_jobs_page(
 
     data = response.json()
 
-    jobs = data.get("stellenangebote", [])
+    jobs = data.get("ergebnisliste", [])
     total_jobs = data.get("maxErgebnisse", 0)
-    
+
     print(
         f"Page {page}: received {len(jobs)} jobs "
         f"of {total_jobs} total"
@@ -85,24 +84,38 @@ def transform_jobs(jobs: list[dict]) -> pd.DataFrame:
     jobs_list = []
 
     for job in jobs:
-        workplace = job.get("arbeitsort", {})
-        coordinates = workplace.get("koordinaten", {})
+        locations = job.get("stellenlokationen", [])
+        location = locations[0] if locations else {}
+        address = location.get("adresse", {})
+        start_period = job.get("eintrittszeitraum", {})
+        publication_period = job.get("veroeffentlichungszeitraum", {})
 
         jobs_list.append(
             {
-                "job_id": job.get("refnr"),
-                "title": job.get("titel"),
-                "profession": job.get("beruf"),
-                "company": job.get("arbeitgeber"),
-                "postal_code": workplace.get("plz"),
-                "city": workplace.get("ort"),
-                "state": workplace.get("region"),
-                "country": workplace.get("land"),
-                "latitude": coordinates.get("lat"),
-                "longitude": coordinates.get("lon"),
-                "date_posted": job.get("aktuelleVeroeffentlichungsdatum"),
-                "date_modified": job.get("modifikationsTimestamp"),
-                "start_date": job.get("eintrittsdatum"),
+                "job_id": job.get("referenznummer"),
+                "title": job.get("stellenangebotsTitel"),
+                "profession": job.get("hauptberuf"),
+                "all_professions": ", ".join(job.get("alleBerufe", [])),
+                "company": job.get("firma"),
+                "postal_code": address.get("plz"),
+                "city": address.get("ort"),
+                "state": address.get("region"),
+                "country": address.get("land"),
+                "latitude": location.get("breite"),
+                "longitude": location.get("laenge"),
+                "date_posted": job.get("datumErsteVeroeffentlichung"),
+                "date_modified": job.get("aenderungsdatum"),
+                "publication_start": publication_period.get("von"),
+                "start_date": start_period.get("von"),
+                "employment_type": job.get("stellenangebotsart"),
+                "full_time": job.get("arbeitszeitVollzeit"),
+                "contract_duration": job.get("vertragsdauer"),
+                "salary_type": job.get("artDerVerguetung"),
+                "salary_period": job.get("verguetungsangabe"),
+                "salary_min": job.get("gehaltsspanneVon"),
+                "salary_max": job.get("gehaltsspanneBis"),
+                "mini_job": job.get("istGeringfuegigeBeschaeftigung"),
+                "career_changer": job.get("quereinstiegGeeignet"),
             }
         )
 
